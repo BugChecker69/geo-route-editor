@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geo Route & Area Editor (KML/GPX)</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    #map { height: calc(100vh - 65px); width: 100%; }
+    .custom-div-icon {
+      background-color: #2563eb;
+      color: #fff;
+      font-size: 11px;
+      font-weight: bold;
+      border: 2px solid #fff;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased flex flex-col h-screen overflow-hidden">
+
+  <!-- ヘッダー -->
+  <header class="bg-slate-800 text-white px-4 py-2.5 flex items-center justify-between shadow-md z-10 shrink-0">
+    <div class="flex items-center gap-3">
+      <i class="fa-solid fa-map-location-dot text-blue-400 text-lg"></i>
+      <div>
+        <h1 class="text-sm font-bold tracking-wide">Geo Route & Area Editor</h1>
+        <p class="text-[10px] text-slate-300">ツーリングルート計画 / エリア作成 / KML・GPX相互変換</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <!-- 既存ファイル読込 -->
+      <label class="bg-slate-700 hover:bg-slate-600 text-xs px-2.5 py-1.5 rounded cursor-pointer transition flex items-center gap-1.5 border border-slate-600">
+        <i class="fa-solid fa-file-import"></i> インポート (KML/GPX)
+        <input type="file" id="file-import" accept=".kml,.gpx" class="hidden">
+      </label>
+      <!-- 一括クリア -->
+      <button id="btn-clear" class="bg-red-700/80 hover:bg-red-600 text-xs px-2.5 py-1.5 rounded transition flex items-center gap-1.5">
+        <i class="fa-solid fa-trash-can"></i> クリア
+      </button>
+    </div>
+  </header>
+
+  <div class="flex flex-1 overflow-hidden relative">
+
+    <!-- サイドバー（操作パネル） -->
+    <aside class="w-80 md:w-96 bg-white border-r border-slate-200 flex flex-col z-10 shadow-sm shrink-0">
+      
+      <!-- パネル上部：モード・検索設定 -->
+      <div class="p-4 border-b border-slate-100 flex flex-col gap-3">
+        <!-- 住所・地点検索 -->
+        <div class="flex gap-1.5">
+          <input type="text" id="search-input" placeholder="地名・住所を検索（Enterで移動）" class="w-full border border-slate-300 rounded px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <button id="btn-search" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded text-xs transition shrink-0">
+            <i class="fa-solid fa-magnifying-glass"></i>
+          </button>
+        </div>
+
+        <!-- 描画モード切替 -->
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">形状モード</label>
+          <div class="grid grid-cols-2 gap-1.5">
+            <label class="flex items-center justify-center p-2 border rounded cursor-pointer hover:bg-slate-50 text-xs font-semibold has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-700">
+              <input type="radio" name="geometry-mode" value="line" class="sr-only" checked>
+              <i class="fa-solid fa-route mr-1.5"></i> ルート / 経路
+            </label>
+            <label class="flex items-center justify-center p-2 border rounded cursor-pointer hover:bg-slate-50 text-xs font-semibold has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-700">
+              <input type="radio" name="geometry-mode" value="polygon" class="sr-only">
+              <i class="fa-solid fa-draw-polygon mr-1.5"></i> エリア / 面
+            </label>
+          </div>
+        </div>
+
+        <!-- ルート接続方式（ライン選択時） -->
+        <div id="routing-options">
+          <label class="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ポイント間接続</label>
+          <div class="grid grid-cols-2 gap-1.5">
+            <label class="flex items-center justify-center p-1.5 border rounded cursor-pointer hover:bg-slate-50 text-xs has-[:checked]:border-slate-800 has-[:checked]:bg-slate-100 font-medium">
+              <input type="radio" name="route-type" value="direct" class="sr-only" checked>
+              直線接続 (屈折点)
+            </label>
+            <label class="flex items-center justify-center p-1.5 border rounded cursor-pointer hover:bg-slate-50 text-xs has-[:checked]:border-slate-800 has-[:checked]:bg-slate-100 font-medium">
+              <input type="radio" name="route-type" value="road" class="sr-only">
+              道路スナップ (車/バイク)
+            </label>
+          </div>
+        </div>
+
+        <!-- 距離・面積サマリー表示 -->
+        <div class="bg-slate-50 border border-slate-200 rounded p-2.5 flex items-center justify-between text-xs">
+          <span class="text-slate-600 font-medium" id="stat-label">総走行距離:</span>
+          <span class="text-sm font-bold text-blue-600 font-mono" id="stat-value">0.00 km</span>
+        </div>
+      </div>
+
+      <!-- 屈折点リスト（テーブル表示） -->
+      <div class="flex-1 overflow-y-auto p-3">
+        <div class="flex justify-between items-center mb-2 px-1">
+          <span class="text-[11px] font-bold text-slate-600">経由点リスト (<span id="point-count">0</span>)</span>
+          <button id="btn-undo" class="text-[11px] text-slate-500 hover:text-slate-800">
+            <i class="fa-solid fa-rotate-left"></i> 1つ戻す
+          </button>
+        </div>
+        <div id="points-container" class="space-y-1.5 text-xs">
+          <!-- 動的リスト -->
+          <p class="text-slate-400 text-center py-6 text-[11px]">地図上をクリックしてポイントを追加してください。<br>ピンはドラッグして位置を調整できます。</p>
+        </div>
+      </div>
+
+      <!-- パネル下部：エクスポート操作 -->
+      <div class="p-3 border-t border-slate-200 bg-slate-50 flex flex-col gap-2">
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-600 mb-1">出力データ名</label>
+          <input type="text" id="export-name" value="touring_route" class="w-full border border-slate-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500 bg-white">
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-export-kml" class="bg-blue-600 hover:bg-blue-500 text-white text-xs py-2 rounded font-medium transition flex items-center justify-center gap-1.5 shadow-sm">
+            <i class="fa-solid fa-file-code"></i> KML 出力
+          </button>
+          <button id="btn-export-gpx" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-2 rounded font-medium transition flex items-center justify-center gap-1.5 shadow-sm">
+            <i class="fa-solid fa-location-crosshairs"></i> GPX 出力
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 地図領域 -->
+    <main class="flex-1 relative">
+      <div id="map"></div>
+    </main>
+
+  </div>
+
+  <script>
+    // --- 地図初期化 ---
+    // 国土地理院（標準・写真）および OpenStreetMap タイル定義
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    });
+
+    const gsiStdLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; 国土地理院 (標準地図)'
+    });
+
+    const gsiPhotoLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
+      maxZoom: 18,
+      attribution: '&copy; 国土地理院 (航空写真)'
+    });
+
+    const map = L.map('map', {
+      center: [35.681236, 139.767125],
+      zoom: 13,
+      layers: [gsiStdLayer]
+    });
+
+    L.control.layers({
+      'OpenStreetMap': osmLayer,
+      '国土地理院 (標準)': gsiStdLayer,
+      '国土地理院 (航空写真)': gsiPhotoLayer
+    }).addTo(map);
+
+    // --- アプリケーション状態 ---
+    let waypoints = []; // [{ id, lat, lng, marker }]
+    let activePathLayer = null; // Polyline または Polygon
+    let roadDetailedCoordinates = []; // 道路スナップ時の補間座標列
+
+    // --- 距離計算 (Hubenyの公式 / 簡易球面三角) ---
+    function computeDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // 地球半径(m)
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    // --- 道路ルーティングAPI (OSRM Public API) 呼び出し ---
+    async function fetchRoadRoute(coords) {
+      if (coords.length < 2) return coords;
+      const coordString = coords.map(c => `${c.lng},${c.lat}`).join(';');
+      const url = `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+          return data.routes[0].geometry.coordinates.map(coord => ({ lat: coord[1], lng: coord[0] }));
+        }
+      } catch (err) {
+        console.warn('Routing API failed, fallback to direct lines.', err);
+      }
+      return coords;
+    }
+
+    // --- 地図レイヤーの再描画とUI更新 ---
+    async function updateMap() {
+      const geomMode = document.querySelector('input[name="geometry-mode"]:checked').value;
+      const routeType = document.querySelector('input[name="route-type"]:checked').value;
+      const routingOptions = document.getElementById('routing-options');
+      const statLabel = document.getElementById('stat-label');
+      const statValue = document.getElementById('stat-value');
+      const pointCount = document.getElementById('point-count');
+      const pointsContainer = document.getElementById('points-container');
+
+      routingOptions.style.display = (geomMode === 'line') ? 'block' : 'none';
+      pointCount.textContent = waypoints.length;
+
+      // 既存ライン/ポリゴン削除
+      if (activePathLayer) {
+        map.removeLayer(activePathLayer);
+        activePathLayer = null;
+      }
+
+      // マーカーのアイコン番号・インデックス再付与
+      waypoints.forEach((wp, idx) => {
+        const icon = L.divIcon({
+          className: 'custom-div-icon',
+          html: `${idx + 1}`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11]
+        });
+        wp.marker.setIcon(icon);
+      });
+
+      if (waypoints.length === 0) {
+        statValue.textContent = '0.00 km';
+        pointsContainer.innerHTML = '<p class="text-slate-400 text-center py-6 text-[11px]">地図上をクリックしてポイントを追加してください。<br>ピンはドラッグして位置を調整できます。</p>';
+        return;
+      }
+
+      const rawCoords = waypoints.map(w => ({ lat: w.lat, lng: w.lng }));
+
+      // ルート / エリア描画
+      if (geomMode === 'polygon') {
+        statLabel.textContent = '外周距離:';
+        activePathLayer = L.polygon(rawCoords, { color: '#2563eb', weight: 3, fillOpacity: 0.2 }).addTo(map);
+        
+        let totalD = 0;
+        for (let i = 0; i < rawCoords.length; i++) {
+          const next = rawCoords[(i + 1) % rawCoords.length];
+          totalD += computeDistance(rawCoords[i].lat, rawCoords[i].lng, next.lat, next.lng);
+        }
+        statValue.textContent = (totalD >= 1000) ? (totalD / 1000).toFixed(2) + ' km' : Math.round(totalD) + ' m';
+        roadDetailedCoordinates = [];
+      } else {
+        statLabel.textContent = '総走行距離:';
+        if (routeType === 'road' && waypoints.length >= 2) {
+          const roadPoints = await fetchRoadRoute(rawCoords);
+          roadDetailedCoordinates = roadPoints;
+          activePathLayer = L.polyline(roadPoints, { color: '#059669', weight: 4 }).addTo(map);
+          
+          let totalD = 0;
+          for (let i = 0; i < roadPoints.length - 1; i++) {
+            totalD += computeDistance(roadPoints[i].lat, roadPoints[i].lng, roadPoints[i+1].lat, roadPoints[i+1].lng);
+          }
+          statValue.textContent = (totalD >= 1000) ? (totalD / 1000).toFixed(2) + ' km' : Math.round(totalD) + ' m';
+        } else {
+          roadDetailedCoordinates = [];
+          activePathLayer = L.polyline(rawCoords, { color: '#2563eb', weight: 4 }).addTo(map);
+          
+          let totalD = 0;
+          for (let i = 0; i < rawCoords.length - 1; i++) {
+            totalD += computeDistance(rawCoords[i].lat, rawCoords[i].lng, rawCoords[i+1].lat, rawCoords[i+1].lng);
+          }
+          statValue.textContent = (totalD >= 1000) ? (totalD / 1000).toFixed(2) + ' km' : Math.round(totalD) + ' m';
+        }
+      }
+
+      // サイドバーのポイントリスト生成
+      pointsContainer.innerHTML = '';
+      waypoints.forEach((wp, idx) => {
+        let legDist = 0;
+        if (idx > 0) {
+          legDist = computeDistance(waypoints[idx-1].lat, waypoints[idx-1].lng, wp.lat, wp.lng);
+        }
+        const legText = idx === 0 ? 'START' : (legDist >= 1000 ? `+${(legDist/1000).toFixed(2)}km` : `+${Math.round(legDist)}m`);
+
+        const div = document.createElement('div');
+        div.className = 'flex items-center justify-between p-2 bg-slate-50 border border-slate-200 rounded text-[11px]';
+        div.innerHTML = `
+          <div class="flex items-center gap-2 overflow-hidden">
+            <span class="w-4 h-4 rounded-full bg-slate-700 text-white flex items-center justify-center font-bold text-[9px] shrink-0">${idx + 1}</span>
+            <div class="truncate font-mono">
+              ${wp.lat.toFixed(5)}, ${wp.lng.toFixed(5)}
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-[10px] text-slate-500 font-semibold">${legText}</span>
+            <button class="text-red-500 hover:text-red-700 p-1" onclick="removePoint(${wp.id})">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        `;
+        pointsContainer.appendChild(div);
+      });
+    }
+
+    // --- ポイント操作 ---
+    function addPoint(lat, lng) {
+      const id = Date.now() + Math.random();
+      const marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+
+      marker.on('dragend', (e) => {
+        const pos = e.target.getLatLng();
+        const wp = waypoints.find(w => w.id === id);
+        if (wp) {
+          wp.lat = pos.lat;
+          wp.lng = pos.lng;
+          updateMap();
+        }
+      });
+
+      waypoints.push({ id, lat, lng, marker });
+      updateMap();
+    }
+
+    window.removePoint = function(id) {
+      const idx = waypoints.findIndex(w => w.id === id);
+      if (idx !== -1) {
+        map.removeLayer(waypoints[idx].marker);
+        waypoints.splice(idx, 1);
+        updateMap();
+      }
+    };
+
+    map.on('click', (e) => {
+      addPoint(e.latlng.lat, e.latlng.lng);
+    });
+
+    document.getElementById('btn-undo').addEventListener('click', () => {
+      if (waypoints.length > 0) {
+        const last = waypoints.pop();
+        map.removeLayer(last.marker);
+        updateMap();
+      }
+    });
+
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      if (confirm('配置したすべてのポイントをクリアしますか？')) {
+        waypoints.forEach(w => map.removeLayer(w.marker));
+        waypoints = [];
+        updateMap();
+      }
+    });
+
+    // --- 住所・地名検索 (Nominatim) ---
+    async function searchLocation() {
+      const query = document.getElementById('search-input').value.trim();
+      if (!query) return;
+
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`;
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data && data.length > 0) {
+          const lat = parseFloat(data[0].lat);
+          const lon = parseFloat(data[0].lon);
+          map.setView([lat, lon], 14);
+        } else {
+          alert('該当する場所が見つかりませんでした。');
+        }
+      } catch (err) {
+        alert('検索中にエラーが発生しました。');
+      }
+    }
+
+    document.getElementById('btn-search').addEventListener('click', searchLocation);
+    document.getElementById('search-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') searchLocation();
+    });
+
+    // --- モード切替イベント ---
+    document.querySelectorAll('input[name="geometry-mode"], input[name="route-type"]').forEach(el => {
+      el.addEventListener('change', updateMap);
+    });
+
+    // --- ファイルエクスポート処理 ---
+    function downloadFile(content, fileName, mimeType) {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // KML エクスポート (2次元座標 / 高度なし)
+    document.getElementById('btn-export-kml').addEventListener('click', () => {
+      if (waypoints.length === 0) {
+        alert('エクスポートするポイントが存在しません。');
+        return;
+      }
+      const name = document.getElementById('export-name').value.trim() || 'route';
+      const geomMode = document.querySelector('input[name="geometry-mode"]:checked').value;
+      const targetCoords = (roadDetailedCoordinates.length > 0) ? roadDetailedCoordinates : waypoints.map(w => ({ lat: w.lat, lng: w.lng }));
+
+      let geometryKml = '';
+      if (geomMode === 'polygon') {
+        const closed = [...targetCoords];
+        if (closed[0].lat !== closed[closed.length - 1].lat || closed[0].lng !== closed[closed.length - 1].lng) {
+          closed.push(closed[0]);
+        }
+        const coordStr = closed.map(c => `${c.lng.toFixed(7)},${c.lat.toFixed(7)}`).join(' ');
+        geometryKml = `
+      <Polygon>
+        <altitudeMode>clampToGround</altitudeMode>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>${coordStr}</coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>`;
+      } else {
+        const coordStr = targetCoords.map(c => `${c.lng.toFixed(7)},${c.lat.toFixed(7)}`).join(' ');
+        geometryKml = `
+      <LineString>
+        <altitudeMode>clampToGround</altitudeMode>
+        <coordinates>${coordStr}</coordinates>
+      </LineString>`;
+      }
+
+      const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${name}</name>
+    <Placemark>
+      <name>${name}</name>
+      ${geometryKml}
+    </Placemark>
+  </Document>
+</kml>`;
+
+      downloadFile(kml, `${name}.kml`, 'application/vnd.google-earth.kml+xml');
+    });
+
+    // GPX エクスポート (Garmin / OsmAnd 準拠トラック・ウェイポイント)
+    document.getElementById('btn-export-gpx').addEventListener('click', () => {
+      if (waypoints.length === 0) {
+        alert('エクスポートするポイントが存在しません。');
+        return;
+      }
+      const name = document.getElementById('export-name').value.trim() || 'route';
+      const targetCoords = (roadDetailedCoordinates.length > 0) ? roadDetailedCoordinates : waypoints.map(w => ({ lat: w.lat, lng: w.lng }));
+
+      // 経由点（ウェイポイント）
+      const wptTags = waypoints.map((w, idx) => 
+        `  <wpt lat="${w.lat.toFixed(7)}" lon="${w.lng.toFixed(7)}"><name>Point ${idx + 1}</name></wpt>`
+      ).join('\n');
+
+      // トラックポイント列
+      const trkptTags = targetCoords.map(c => 
+        `      <trkpt lat="${c.lat.toFixed(7)}" lon="${c.lng.toFixed(7)}" />`
+      ).join('\n');
+
+      const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="GeoRouteEditor" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>${name}</name>
+    <time>${new Date().toISOString()}</time>
+  </metadata>
+${wptTags}
+  <trk>
+    <name>${name}</name>
+    <trkseg>
+${trkptTags}
+    </trkseg>
+  </trk>
+</gpx>`;
+
+      downloadFile(gpx, `${name}.gpx`, 'application/gpx+xml');
+    });
+
+    // --- 外部 KML / GPX インポート処理 ---
+    document.getElementById('file-import').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target.result;
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, 'text/xml');
+
+        // クリア
+        waypoints.forEach(w => map.removeLayer(w.marker));
+        waypoints = [];
+
+        if (file.name.endsWith('.kml')) {
+          const coordsTag = xml.querySelector('coordinates');
+          if (coordsTag) {
+            const rawText = coordsTag.textContent.trim();
+            const pairs = rawText.split(/\s+/);
+            pairs.forEach(pair => {
+              const parts = pair.split(',');
+              if (parts.length >= 2) {
+                const lng = parseFloat(parts[0]);
+                const lat = parseFloat(parts[1]);
+                if (!isNaN(lat) && !isNaN(lng)) addPoint(lat, lng);
+              }
+            });
+          }
+        } else if (file.name.endsWith('.gpx')) {
+          const trkpts = xml.querySelectorAll('trkpt');
+          if (trkpts.length > 0) {
+            trkpts.forEach(pt => {
+              const lat = parseFloat(pt.getAttribute('lat'));
+              const lng = parseFloat(pt.getAttribute('lon'));
+              if (!isNaN(lat) && !isNaN(lng)) addPoint(lat, lng);
+            });
+          } else {
+            const wpts = xml.querySelectorAll('wpt');
+            wpts.forEach(pt => {
+              const lat = parseFloat(pt.getAttribute('lat'));
+              const lng = parseFloat(pt.getAttribute('lon'));
+              if (!isNaN(lat) && !isNaN(lng)) addPoint(lat, lng);
+            });
+          }
+        }
+
+        if (waypoints.length > 0) {
+          const bounds = L.latLngBounds(waypoints.map(w => [w.lat, w.lng]));
+          map.fitBounds(bounds);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+  </script>
+</body>
+</html>
